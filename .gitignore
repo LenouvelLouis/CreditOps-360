@@ -1,0 +1,22 @@
+# Data (Kaggle rules: no redistribution)
+data/
+*.parquet
+*.csv
+*.zip
+!dataiku/*.zip
+
+# Local secrets
+.dss_key
+kaggle.json
+.env
+
+# Python / notebooks
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
