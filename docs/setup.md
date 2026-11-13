@@ -4,17 +4,12 @@
 
 Installer Dataiku DSS Free Edition (launcher Windows ou distribution Linux/macOS) depuis https://www.dataiku.com/product/get-started.
 
-## 2. Données Home Credit
+## 2. Données
 
-1. Créer un compte Kaggle et accepter les règles de la compétition *Home Credit, Credit Risk Model Stability* (onglet Data).
-2. Générer un token API (Kaggle > Settings > Create New Token) et placer `kaggle.json` dans `%USERPROFILE%\.kaggle\`.
-3. Lancer `scripts\download_data.ps1`.
-
-Seul le dossier `parquet_files/` et `feature_definitions.csv` sont conservés dans `data/raw/homecredit/`.
-
-## 3. Réclamations CFPB
-
-Télécharger depuis la page de l'archive des narratives les exports 1, 4, 20 et 21, puis les extraire chacun dans `data/raw/cfpb/<nom de l'export>/`.
+| Source | Fichiers à placer |
+| --- | --- |
+| [Kaggle, Home Credit CRMS](https://www.kaggle.com/competitions/home-credit-credit-risk-model-stability) (règles de la compétition à accepter) | `parquet_files/` et `feature_definitions.csv` dans `data/raw/homecredit/` |
+| [CFPB, archive des narratives](https://www.consumerfinance.gov/foia-requests/foia-electronic-reading-room/cfpb-consumer-complaint-database-narratives-archive/) | Exports 1, 4, 20 et 21, chacun extrait dans `data/raw/cfpb/<nom de l'export>/` |
 
 ## 4. Contrôle
 
@@ -22,6 +17,12 @@ Télécharger depuis la page de l'archive des narratives les exports 1, 4, 20 et
 python scripts/check_data.py
 ```
 
-## 5. Connexion Dataiku
+## 5. Projet Dataiku
 
-Administration > Connections > New connection > Filesystem, nom `creditops_data`, root path = dossier `data` du dépôt. Puis importer le projet depuis `dataiku/`.
+Créer une clé d'API personnelle (Profile & Settings > API keys), l'enregistrer dans `~/.creditops_dss_key`, puis lancer avec le Python fourni par DSS :
+
+```
+python scripts/setup_dss_project.py --host http://localhost:11200
+```
+
+Le script crée la connexion `creditops_data`, le projet, ses zones, ses variables et les datasets sources. Il peut être relancé sans risque.

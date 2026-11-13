@@ -14,9 +14,9 @@ La direction des risques veut industrialiser l'octroi de crédit à la consommat
 
 | Zone | Contenu |
 | --- | --- |
-| 1. Ingestion | Tables Home Credit en Parquet, partitionnement par semaine, dictionnaire de données |
+| 1. Ingestion | Dossier des Parquet bruts, recette Python de conversion des tables légères en datasets (DSS ne lit pas le Parquet nativement sous Windows), dictionnaire de données |
 | 2. Qualité | Data quality rules, métriques et checks |
-| 3. Features | Agrégations profondeur 1 (recettes visuelles) et profondeur 2 (Python), jointure sur `case_id` |
+| 3. Features | Agrégation Python des tables lourdes (210 M de lignes, lecture par fichier), recettes Group visuelles sur les tables légères, jointure sur `case_id` |
 | 4. ML | Statistiques interactives, Visual ML, explicabilité, analyse d'équité, scoring |
 | 5. Monitoring | Model Evaluation Store, dérive des données et des prédictions, PSI et Gini par semaine |
 | 6. Réclamations | Classification, résumé et extraction d'entités par LLM, évaluation contre les labels CFPB |
