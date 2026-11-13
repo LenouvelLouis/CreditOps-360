@@ -90,13 +90,16 @@ def ensure_dataset(project, zone, name, path, pattern, fmt, fmt_params=None):
 
 LIB_SRC = REPO / "dataiku" / "python" / "creditops"
 RECIPES = {
-    # recipe name: (zone, extra input datasets, outputs); every recipe also reads hc_raw_parquet
-    "ingest_homecredit": ("1 Ingestion", [], [f"hc_{t}" for t in (
+    # recipe name: (zone, inputs, outputs); "hc_raw_parquet" is the raw folder
+    "ingest_homecredit": ("1 Ingestion", ["hc_raw_parquet"], [f"hc_{t}" for t in (
         "base", "static_0", "static_cb_0", "applprev_1", "person_1", "credit_bureau_b_1",
         "debitcard_1", "deposit_1", "other_1", "tax_registry_a_1", "tax_registry_b_1",
         "tax_registry_c_1")]),
-    "aggregate_bureau": ("3 Features", [], ["hc_agg_bureau"]),
-    "join_features": ("3 Features", ["hc_agg_bureau"], ["hc_features"]),
+    "aggregate_bureau": ("3 Features", ["hc_raw_parquet"], ["hc_agg_bureau"]),
+    "join_features": ("3 Features", ["hc_raw_parquet", "hc_agg_bureau"], ["hc_features"]),
+    # needs hc_prod_scored, produced by the visual Score recipe on the deployed model
+    "weekly_monitoring": ("5 Monitoring", ["hc_prod_scored"],
+                          ["hc_weekly_monitoring", "hc_stability_summary"]),
 }
 
 
@@ -136,9 +139,12 @@ def ensure_recipes(project, zones, folder_id) -> None:
             settings.save()
             continue
         builder = project.new_recipe("python", name)
-        builder.with_input(folder_id)
+        datasets = {d["name"] for d in project.list_datasets()}
+        if any(i != "hc_raw_parquet" and i not in datasets for i in inputs):
+            print(f"recipe {name}: skipped, missing input")
+            continue
         for inp in inputs:
-            builder.with_input(inp)
+            builder.with_input(folder_id if inp == "hc_raw_parquet" else inp)
         for out in outputs:
             builder.with_new_output_dataset(out, "filesystem_managed")
         builder.with_script(code)
@@ -169,6 +175,9 @@ def ensure_split(project, zone) -> None:
         "defaultOutputIndex": 1,
     })
     settings.save()
+    updates = recipe.compute_schema_updates()  # propagates the input schema to both outputs
+    if updates.any_action_required():
+        updates.apply()
     for item in (recipe, project.get_dataset("hc_train"), project.get_dataset("hc_prod")):
         zone.add_item(item)
     print("recipe split_train_prod: created")
