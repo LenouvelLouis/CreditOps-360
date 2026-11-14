@@ -1,0 +1,12 @@
+{
+    "meta": {
+        "label": "Ollama embedding model",
+        "description": "Text embeddings through the Ollama /api/embed endpoint.",
+        "icon": "fas fa-project-diagram"
+    },
+    "params": [
+        {"name": "base_url", "label": "Ollama URL", "type": "STRING", "defaultValue": "http://localhost:11434", "mandatory": true},
+        {"name": "model", "label": "Model", "type": "STRING", "defaultValue": "bge-m3", "mandatory": true},
+        {"name": "timeout", "label": "Timeout (s)", "type": "INT", "defaultValue": 120}
+    ]
+}

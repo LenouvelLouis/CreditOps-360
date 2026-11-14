@@ -11,7 +11,9 @@ Usage (with the Python environment shipped with DSS, which includes dataikuapi):
 from __future__ import annotations
 
 import argparse
+import io
 import os
+import zipfile
 import re
 import sys
 from pathlib import Path
@@ -97,6 +99,7 @@ RECIPES = {
         "tax_registry_c_1")]),
     "aggregate_bureau": ("3 Features", ["hc_raw_parquet"], ["hc_agg_bureau"]),
     "join_features": ("3 Features", ["hc_raw_parquet", "hc_agg_bureau"], ["hc_features"]),
+    "prepare_complaints": ("6 Réclamations", ["cfpb_complaints_raw"], ["cfpb_sample"]),
     # needs hc_prod_scored, produced by the visual Score recipe on the deployed model
     "weekly_monitoring": ("5 Monitoring", ["hc_prod_scored"],
                           ["hc_weekly_monitoring", "hc_stability_summary"]),
@@ -183,6 +186,49 @@ def ensure_split(project, zone) -> None:
     print("recipe split_train_prod: created")
 
 
+PLUGIN_DIR = REPO / "dataiku" / "plugins" / "ollama-llm"
+LLM_CONNECTION = "ollama"
+LLM_MODELS = [
+    # (id in the LLM Mesh, capability, plugin component, component settings)
+    ("qwen25", "TEXT_COMPLETION", "ollama-chat",
+     {"base_url": "http://localhost:11434", "model": "qwen2.5:7b", "num_ctx": 8192, "timeout": 600,
+      "system_prompt": "Tu es un analyste bancaire. Réponds uniquement en français."}),
+    ("bge-m3", "TEXT_EMBEDDING", "ollama-embedding",
+     {"base_url": "http://localhost:11434", "model": "bge-m3", "timeout": 120}),
+]
+
+
+def ensure_plugin(client) -> None:
+    """Installs or updates the Ollama LLM plugin from the repository sources."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as z:
+        for f in PLUGIN_DIR.rglob("*"):
+            if f.is_file() and "__pycache__" not in f.parts:
+                z.write(f, f.relative_to(PLUGIN_DIR).as_posix())
+    buffer.seek(0)
+    if "ollama-llm" in {p["id"] for p in client.list_plugins()}:
+        client.get_plugin("ollama-llm").update_from_zip(buffer)
+    else:
+        client.install_plugin_from_archive(buffer)
+    print("plugin ollama-llm: installed")
+
+
+def ensure_llm_connection(client) -> None:
+    """Custom LLM connection exposing the local Ollama models to the LLM Mesh."""
+    if LLM_CONNECTION not in client.list_connections():
+        client.create_connection(LLM_CONNECTION, type="CustomLLM", params={})
+    conn = client.get_connection(LLM_CONNECTION)
+    definition = conn.get_definition()
+    definition["params"]["pluginId"] = "ollama-llm"
+    definition["params"]["models"] = [{
+        "id": model_id, "capability": capability,
+        "type": f"llm_ollama-llm_{component}", "customConfig": config,
+        "maxParallelism": 2,  # a single local GPU
+    } for model_id, capability, component, config in LLM_MODELS]
+    conn.set_definition(definition)
+    print(f"connection {LLM_CONNECTION}: models {[m[0] for m in LLM_MODELS]}")
+
+
 def drop_parquet_datasets(project) -> None:
     """Removes datasets from an earlier version that pointed DSS directly at Parquet files."""
     for d in project.list_datasets():
@@ -198,6 +244,8 @@ def main() -> None:
 
     client = dataikuapi.DSSClient(args.host, api_key())
     ensure_connection(client)
+    ensure_plugin(client)
+    ensure_llm_connection(client)
     project = ensure_project(client)
     zones = ensure_zones(project)
 

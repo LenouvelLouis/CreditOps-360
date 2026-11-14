@@ -1,0 +1,12 @@
+{
+    "id": "ollama-llm",
+    "version": "0.1.0",
+    "meta": {
+        "label": "Ollama LLM connection",
+        "description": "Custom LLM Mesh connection to local models served by Ollama: chat completion with tool calling, and text embeddings.",
+        "author": "Louis Lenouvel",
+        "icon": "fas fa-microchip",
+        "licenseInfo": "Apache Software License",
+        "tags": ["LLM", "Generative AI"]
+    }
+}

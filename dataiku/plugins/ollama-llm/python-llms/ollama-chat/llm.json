@@ -1,0 +1,42 @@
+{
+    "meta": {
+        "label": "Ollama chat model",
+        "description": "Chat completion through the Ollama /api/chat endpoint, with tool calling.",
+        "icon": "fas fa-comments"
+    },
+    "params": [
+        {
+            "name": "base_url",
+            "label": "Ollama URL",
+            "type": "STRING",
+            "defaultValue": "http://localhost:11434",
+            "mandatory": true
+        },
+        {
+            "name": "model",
+            "label": "Model",
+            "type": "STRING",
+            "defaultValue": "qwen2.5:7b",
+            "mandatory": true
+        },
+        {
+            "name": "system_prompt",
+            "label": "System instruction",
+            "type": "TEXTAREA",
+            "description": "Added to every conversation (appended to an existing system message).",
+            "defaultValue": "Tu es un analyste bancaire. Réponds uniquement en français."
+        },
+        {
+            "name": "num_ctx",
+            "label": "Context window (tokens)",
+            "type": "INT",
+            "defaultValue": 8192
+        },
+        {
+            "name": "timeout",
+            "label": "Timeout (s)",
+            "type": "INT",
+            "defaultValue": 600
+        }
+    ]
+}

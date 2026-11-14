@@ -26,6 +26,12 @@ bureau = dataiku.Dataset("hc_agg_bureau").get_dataframe()
 features = features.merge(bureau, on="case_id", how="left")
 del bureau
 
+# Age band: not a model input, used for the fairness analysis (AI Act, Annex III)
+age = -features["static_cb_0__dateofbirth_337D"] / 365.25
+features["age_band"] = pd.cut(age, [0, 30, 45, 60, 120], right=False,
+                              labels=["18-29", "30-44", "45-59", "60+"]).astype(str)
+features.loc[age.isna(), "age_band"] = "unknown"
+
 # Columns that are fully empty bring nothing to the model
 features = features.dropna(axis=1, how="all")
 print(f"hc_features: {len(features):,} rows, {features.shape[1]} cols")
