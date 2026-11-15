@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 
 import dataikuapi
+from dataikuapi.dss.recipe import EmbedDatasetRecipeCreator
 
 REPO = Path(__file__).resolve().parents[1]
 CONNECTION = "creditops_data"
@@ -92,12 +93,13 @@ def ensure_dataset(project, zone, name, path, pattern, fmt, fmt_params=None):
 
 LIB_SRC = REPO / "dataiku" / "python" / "creditops"
 RECIPES = {
-    # recipe name: (zone, inputs, outputs); "hc_raw_parquet" is the raw folder
+    # recipe name: (zone, inputs, outputs); inputs may be datasets or FOLDERS
     "ingest_homecredit": ("1 Ingestion", ["hc_raw_parquet"], [f"hc_{t}" for t in (
         "base", "static_0", "static_cb_0", "applprev_1", "person_1", "credit_bureau_b_1",
         "debitcard_1", "deposit_1", "other_1", "tax_registry_a_1", "tax_registry_b_1",
         "tax_registry_c_1")]),
     "aggregate_bureau": ("3 Features", ["hc_raw_parquet"], ["hc_agg_bureau"]),
+    "chunk_regulations": ("7 Réglementaire", ["reg_documents"], ["reg_chunks"]),
     "join_features": ("3 Features", ["hc_raw_parquet", "hc_agg_bureau"], ["hc_features"]),
     "prepare_complaints": ("6 Réclamations", ["cfpb_complaints_raw"], ["cfpb_sample"]),
     # needs hc_prod_scored, produced by the visual Score recipe on the deployed model
@@ -106,18 +108,42 @@ RECIPES = {
 }
 
 
-def ensure_raw_folder(project, zone):
-    """Folder pointing at the raw Parquet files (DSS cannot read Parquet natively on Windows)."""
-    for f in project.list_managed_folders():
-        if f["name"] == "hc_raw_parquet":
-            return f["id"]
-    folder = project.create_managed_folder("hc_raw_parquet", connection_name=CONNECTION)
-    settings = folder.get_settings()
-    settings.get_raw()["params"]["path"] = "/raw/" + HC_TRAIN
-    settings.save()
-    zone.add_item(folder)
-    print("folder hc_raw_parquet: created")
-    return folder.id
+FOLDERS = {
+    # folder name: (zone, path in the creditops_data connection)
+    "hc_raw_parquet": ("1 Ingestion", "/raw/" + HC_TRAIN),  # DSS cannot read Parquet natively on Windows
+    "reg_documents": ("7 Réglementaire", "/raw/reglementaire"),
+}
+CODE_ENV = "creditops"
+CODE_ENV_PACKAGES = "pypdf==5.1.0\nscikit-learn\n"
+RECIPE_CODE_ENV = {"chunk_regulations": CODE_ENV}
+
+
+def ensure_folders(project, zones) -> dict:
+    """Folders pointing at raw files; returns folder name -> id."""
+    ids = {f["name"]: f["id"] for f in project.list_managed_folders()}
+    for name, (zone, path) in FOLDERS.items():
+        if name in ids:
+            continue
+        folder = project.create_managed_folder(name, connection_name=CONNECTION)
+        settings = folder.get_settings()
+        settings.get_raw()["params"]["path"] = path
+        settings.save()
+        zones[zone].add_item(folder)
+        ids[name] = folder.id
+        print(f"folder {name}: created")
+    return ids
+
+
+def ensure_code_env(client) -> None:
+    if CODE_ENV not in {e["envName"] for e in client.list_code_envs()}:
+        client.create_code_env("PYTHON", CODE_ENV, "DESIGN_MANAGED",
+                               {"pythonInterpreter": "PYTHON311", "installCorePackages": True})
+        env = client.get_code_env("PYTHON", CODE_ENV)
+        settings = env.get_settings()
+        settings.get_raw()["specPackageList"] = CODE_ENV_PACKAGES
+        settings.save()
+        env.update_packages()
+        print(f"code env {CODE_ENV}: created")
 
 
 def sync_library(project) -> None:
@@ -132,7 +158,7 @@ def sync_library(project) -> None:
     print("library: synced")
 
 
-def ensure_recipes(project, zones, folder_id) -> None:
+def ensure_recipes(project, zones, folder_ids) -> None:
     existing = {r["name"] for r in project.list_recipes()}
     for name, (zone, inputs, outputs) in RECIPES.items():
         code = (REPO / "dataiku" / "recipes" / f"{name}.py").read_text(encoding="utf-8")
@@ -143,15 +169,20 @@ def ensure_recipes(project, zones, folder_id) -> None:
             continue
         builder = project.new_recipe("python", name)
         datasets = {d["name"] for d in project.list_datasets()}
-        if any(i != "hc_raw_parquet" and i not in datasets for i in inputs):
+        if any(i not in folder_ids and i not in datasets for i in inputs):
             print(f"recipe {name}: skipped, missing input")
             continue
         for inp in inputs:
-            builder.with_input(folder_id if inp == "hc_raw_parquet" else inp)
+            builder.with_input(folder_ids.get(inp, inp))
         for out in outputs:
             builder.with_new_output_dataset(out, "filesystem_managed")
         builder.with_script(code)
         recipe = builder.create()
+        if name in RECIPE_CODE_ENV:
+            settings = recipe.get_settings()
+            settings.get_recipe_raw_definition()["params"]["envSelection"] = {
+                "envMode": "EXPLICIT_ENV", "envName": RECIPE_CODE_ENV[name]}
+            settings.save()
         zones[zone].add_item(recipe)
         for out in outputs:
             zones[zone].add_item(project.get_dataset(out))
@@ -229,6 +260,29 @@ def ensure_llm_connection(client) -> None:
     print(f"connection {LLM_CONNECTION}: models {[m[0] for m in LLM_MODELS]}")
 
 
+def ensure_knowledge_bank(project, zones) -> None:
+    """Embed recipe: regulatory passages -> Chroma Knowledge Bank (bge-m3 through Ollama).
+
+    Needs the DSS internal "Retrieval augmented generation" code env
+    (Administration > Code envs > Internal envs setup).
+    """
+    if "embed_regulations" in {r["name"] for r in project.list_recipes()} \
+            or "reg_chunks" not in {d["name"] for d in project.list_datasets()}:
+        return
+    builder = EmbedDatasetRecipeCreator("embed_regulations", project)
+    builder.with_input("reg_chunks")
+    builder.with_output_knowledge_bank("kb_reglementaire", f"custom:{LLM_CONNECTION}:bge-m3", "CHROMA")
+    recipe = builder.create()
+    settings = recipe.get_settings()
+    settings.embedding_column = "text"
+    payload = settings.get_json_payload()
+    payload["metadataColumns"] = [{"column": c} for c in ("chunk_id", "source", "title", "page", "language")]
+    settings.set_json_payload(payload)
+    settings.save()
+    zones["7 Réglementaire"].add_item(recipe)
+    print("knowledge bank kb_reglementaire: created")
+
+
 def drop_parquet_datasets(project) -> None:
     """Removes datasets from an earlier version that pointed DSS directly at Parquet files."""
     for d in project.list_datasets():
@@ -251,10 +305,12 @@ def main() -> None:
 
     ingestion = zones["1 Ingestion"]
     drop_parquet_datasets(project)
-    folder_id = ensure_raw_folder(project, ingestion)
+    ensure_code_env(client)
+    folder_ids = ensure_folders(project, zones)
     sync_library(project)
-    ensure_recipes(project, zones, folder_id)
+    ensure_recipes(project, zones, folder_ids)
     ensure_split(project, zones["4 ML"])
+    ensure_knowledge_bank(project, zones)
 
     csv = {"style": "excel", "charset": "utf-8", "separator": ",", "quoteChar": '"',
            "escapeChar": "\\", "parseHeaderRow": True, "arrayMapFormat": "json"}
