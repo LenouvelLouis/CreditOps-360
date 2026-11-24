@@ -26,3 +26,5 @@ python scripts/setup_dss_project.py --host http://localhost:11200
 ```
 
 Le script crée la connexion `creditops_data`, le projet, ses zones, ses variables et les datasets sources. Il peut être relancé sans risque.
+
+Alternative : importer directement `dataiku/CREDITOPS360.zip` (Import project depuis la page d'accueil DSS). L'archive contient la configuration complète (Flow, recettes, modèle `pd_model` v2, Knowledge Bank, agents, scénario) mais aucune donnée : les datasets sont à reconstruire après avoir placé les fichiers sources dans `data/raw/`. Les échantillons d'entraînement du modèle sont retirés de l'archive, l'onglet d'explication par lignes du modèle sauvegardé n'est donc disponible qu'après réentraînement.
