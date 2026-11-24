@@ -1,5 +1,7 @@
 # Zone 3 - Features: one row per case_id, joining the application tables (depth 0)
 # with the aggregated credit bureau features. Dates become days before the decision.
+# Static tables come from the raw Parquet folder, the base table from the zone 2
+# quality gate (hc_base_validated).
 import os
 
 import dataiku
@@ -10,7 +12,7 @@ folder = dataiku.Folder("hc_raw_parquet")
 root = folder.get_path()
 groups = group_files(os.path.join(root, f) for f in os.listdir(root) if f.endswith(".parquet"))
 
-base = load_chunk(groups["base"][0])
+base = dataiku.Dataset("hc_base_validated").get_dataframe()
 base["date_decision"] = pd.to_datetime(base["date_decision"].astype(str))
 decision = base.set_index("case_id")["date_decision"]
 

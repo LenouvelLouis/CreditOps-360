@@ -15,15 +15,35 @@ La direction des risques veut industrialiser l'octroi de crédit à la consommat
 | Zone | Contenu |
 | --- | --- |
 | 1. Ingestion | Dossier des Parquet bruts, recette Python de conversion des tables légères en datasets (DSS ne lit pas le Parquet nativement sous Windows), dictionnaire de données |
-| 2. Qualité | Data quality rules, métriques et checks |
+| 2. Qualité | Recette de validation bloquante (`hc_base_validated`), règles Data Quality, métrique Python personnalisée (Gini, PSI) |
 | 3. Features | Agrégation Python des tables lourdes (210 M de lignes, lecture par fichier), recettes Group visuelles sur les tables légères, jointure sur `case_id` |
 | 4. ML | Statistiques interactives, Visual ML, explicabilité, analyse d'équité, scoring |
-| 5. Monitoring | Model Evaluation Store, dérive des données et des prédictions, PSI et Gini par semaine |
+| 5. Monitoring | Gini, PSI et score de stabilité par semaine, Evaluate recipe vers un Model Evaluation Store (dérive des données et des prédictions), service API `credit_scoring` |
 | 6. Réclamations | Classification, résumé et extraction d'entités par LLM, évaluation contre les labels CFPB |
 | 7. Réglementaire | Knowledge Bank (EBA, AI Act, ACPR), RAG |
-| 8. Agents | Copilote analyste, agent de revue de dossier, Agent Hub, webapp Credit Cockpit |
+| 8. Agents | Outils (recherche réglementaire, profil de dossier, statistiques de réclamations), agent `copilote_analyste`, agent structuré `revue_dossier` |
 
-Mise en production : bundle publié via le Project Deployer, service API (prédiction + enrichissement par lookup) via l'API Deployer, réentraînement déclenché quand le PSI dépasse 0,2 ou que le Gini chute de plus de 5 points.
+Automatisation : le scénario `weekly_retrain` valide les données, recalcule le monitoring et ne réentraîne le modèle qu'en cas d'alerte (PSI au-delà de 0,2 ou Gini en baisse de plus de 5 points). Le service API `credit_scoring` est conçu et testé sur le nœud Design ; son déploiement (bundle, nœuds Automation et API) est décrit dans [`docs/mlops.md`](docs/mlops.md).
+
+## Résultats
+
+| Brique | Résultat |
+| --- | --- |
+| Données | 1 526 659 dossiers, 17 tables, 210 M de lignes agrégées en 496 variables |
+| Modèle de défaut v2 (LightGBM calibré, test temporel) | AUC 0,824, Gini 0,65, log loss 0,124 (0,457 en v1) ; seuil 0,125 issu d'une matrice de coûts |
+| Stabilité en production simulée (semaines 41 à 91) | Gini moyen 0,63, score de stabilité 0,61, PSI du score max 0,049 |
+| Model Evaluation Store (semaines 80 à 91) | AUC 0,81, log loss 0,126 ; v2 entraînée sans `date_decision` après détection de la dérive en v1 |
+| Triage des réclamations par LLM (206 cas) | JSON valide 100 %, bon produit 62 % (prompt libre) puis 72 % (classification contrainte few-shot) |
+| RAG réglementaire | 1 274 passages (EBA, AI Act, directive crédit conso, ACPR), réponses citées avec document et page |
+| Agents | Copilote analyste et revue de dossier en français, réponses vérifiées sur 4 questions de test |
+
+L'ensemble de la partie GenAI tourne **en local** : modèles servis par Ollama (qwen2.5 7B, bge-m3) et branchés au LLM Mesh par un plugin de connexion maison (`dataiku/plugins/ollama-llm`).
+
+## Documentation
+
+- [`docs/setup.md`](docs/setup.md) : reconstituer l'environnement
+- [`docs/agents.md`](docs/agents.md) : outils, agents et tests
+- [`docs/mlops.md`](docs/mlops.md) : évaluation, service API, déploiement
 
 ## Données
 
@@ -39,12 +59,16 @@ Les données ne sont pas versionnées. Pour les reconstituer, voir [`docs/setup.
 
 ```
 dataiku/            export du projet DSS (configuration, recettes, code), sans données
-dataiku/python/     code de la bibliothèque projet (agrégations, métriques de stabilité)
-scripts/            téléchargement et contrôle des données
+dataiku/python/     bibliothèque projet (agrégations, métriques de stabilité)
+dataiku/recipes/    sources des recettes Python
+dataiku/plugins/    plugin de connexion LLM Mesh vers Ollama
+dataiku/metrics/    métrique personnalisée
+dataiku/scenarios/  étape Python du scénario de réentraînement
+scripts/            mise en place du projet DSS par l'API (idempotente) et contrôle des données
 docs/               installation, choix techniques
 data/               données locales, ignorées par Git
 ```
 
 ## Stack
 
-Dataiku DSS (Visual ML, recettes visuelles et Python, scénarios, LLM Mesh, Knowledge Bank, agents, Project et API Deployer), Python (pandas, pyarrow).
+Dataiku DSS 15 (Visual ML, recettes visuelles et Python, Data Quality, scénarios, Model Evaluation Store, API Designer, LLM Mesh, Prompt Studio, Knowledge Bank, agents, plugins, code envs), Python (pandas, pyarrow, pypdf), Ollama.
